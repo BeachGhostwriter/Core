@@ -1,0 +1,14 @@
+{
+  "name": "adrian-clements-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node serve.mjs"
+  },
+  "dependencies": {
+    "nodemailer": "^8.0.7",
+    "puppeteer": "^24.40.0",
+    "serve": "^14.2.1"
+  }
+}
