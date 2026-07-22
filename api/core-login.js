@@ -26,18 +26,35 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  const email = String(body?.email || '').trim();
+  const identifier = String(body?.email || '').trim();
   const password = String(body?.password || '');
 
-  if (!email || !password) {
+  if (!identifier || !password) {
     return res.status(400).json({ error: 'Email and password are required.' });
   }
 
   try {
     const pool = getPool(config);
+    const { rows: colRows } = await pool.query(
+      `
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = 'core_users'
+      `
+    );
+
+    const columns = new Set(colRows.map((row) => row.column_name));
+    const candidates = ['email', 'userid', 'user_id', 'username'];
+    const available = candidates.filter((name) => columns.has(name));
+
+    if (available.length === 0) {
+      return res.status(500).json({ error: 'Core users table is missing a login identifier column.' });
+    }
+
+    const where = available.map((name) => `lower(${name}) = lower($1)`).join(' OR ');
     const { rows } = await pool.query(
-      'SELECT email, password_hash FROM core_users WHERE lower(email) = lower($1)',
-      [email]
+      `SELECT email, password_hash FROM core_users WHERE ${where} LIMIT 1`,
+      [identifier]
     );
 
     const user = rows[0];

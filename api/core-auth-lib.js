@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const { Pool } = require('pg');
 
 const COOKIE_NAME = 'core_session';
@@ -31,6 +32,9 @@ function makeSignature(value, secret) {
 }
 
 function verifyPassword(password, stored) {
+  if (String(stored || '').startsWith('$2')) {
+    return bcrypt.compareSync(password, String(stored));
+  }
   const [salt, hashHex] = String(stored).split(':');
   if (!salt || !hashHex) return false;
   const hash = crypto.scryptSync(password, salt, 64);

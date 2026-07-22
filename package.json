@@ -6,6 +6,7 @@
     "start": "node serve.mjs"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.2",
     "pg": "^8.11.5",
     "nodemailer": "^8.0.7",
     "puppeteer": "^24.40.0",
