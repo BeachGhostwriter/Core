@@ -4,13 +4,13 @@ const {
 } = require('./core-auth-lib');
 
 module.exports = async function handler(req, res) {
-  const secrets = requireConfig(res);
-  if (!secrets) {
+  const config = requireConfig(res);
+  if (!config) {
     return;
   }
 
-  if (!isAuthenticated(req, secrets)) {
-    return res.redirect(302, '/core/index.html');
+  if (!isAuthenticated(req, config)) {
+    return res.redirect(302, '/index.html');
   }
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -39,7 +39,7 @@ module.exports = async function handler(req, res) {
         <p>You are now inside the CORE protected area on the dedicated subdomain.</p>
         <div class="actions">
           <a class="btn btn-home" href="https://adrian-clements.com">Return to Main Site</a>
-          <a class="btn btn-logout" href="/logout">Sign out</a>
+          <a class="btn btn-logout" href="/api/core-logout">Sign out</a>
         </div>
       </section>
     </main>

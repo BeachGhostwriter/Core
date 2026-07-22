@@ -1,18 +1,42 @@
 const crypto = require('crypto');
+const { Pool } = require('pg');
 
 const COOKIE_NAME = 'core_session';
-const ONE_DAY_SECONDS = 60 * 60 * 24;
+const SESSION_TTL = 60 * 60 * 8;
 
-function getSecrets() {
+let pool;
+
+function getAuthConfig() {
   return {
-    user: process.env.CORE_ADMIN_USER,
-    pass: process.env.CORE_ADMIN_PASSWORD,
-    secret: process.env.CORE_SESSION_SECRET,
+    databaseUrl:
+      process.env.CORE_DATABASE_URL ||
+      process.env.Core_database_url ||
+      process.env.POSTGRES_URL,
+    secret: process.env.CORE_AUTH_SECRET || process.env.Core_secret,
   };
+}
+
+function getPool(config) {
+  if (!pool) {
+    pool = new Pool({
+      connectionString: config.databaseUrl,
+      ssl: { rejectUnauthorized: false },
+    });
+  }
+  return pool;
 }
 
 function makeSignature(value, secret) {
   return crypto.createHmac('sha256', secret).update(value).digest('hex');
+}
+
+function verifyPassword(password, stored) {
+  const [salt, hashHex] = String(stored).split(':');
+  if (!salt || !hashHex) return false;
+  const hash = crypto.scryptSync(password, salt, 64);
+  const storedBuf = Buffer.from(hashHex, 'hex');
+  if (storedBuf.length !== hash.length) return false;
+  return crypto.timingSafeEqual(storedBuf, hash);
 }
 
 function parseCookies(req) {
@@ -29,13 +53,11 @@ function parseCookies(req) {
   }, {});
 }
 
-function encodeSession(userid, secret) {
-  const payload = JSON.stringify({
-    userid,
-    exp: Date.now() + ONE_DAY_SECONDS * 1000,
-  });
+function encodeSession(email, secret) {
+  const exp = Math.floor(Date.now() / 1000) + SESSION_TTL;
+  const payload = `${email}.${exp}`;
   const encoded = Buffer.from(payload).toString('base64url');
-  const sig = makeSignature(encoded, secret);
+  const sig = makeSignature(payload, secret);
   return `${encoded}.${sig}`;
 }
 
@@ -44,23 +66,25 @@ function decodeAndValidateSession(raw, secret) {
     return null;
   }
   const [encoded, sig] = raw.split('.');
-  const expected = makeSignature(encoded, secret);
-  if (sig !== expected) {
+  const payload = Buffer.from(encoded, 'base64url').toString('utf8');
+  const expected = makeSignature(payload, secret);
+  const sigBuf = Buffer.from(sig);
+  const expectedBuf = Buffer.from(expected);
+  if (sigBuf.length !== expectedBuf.length) {
     return null;
   }
-  try {
-    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
-    if (!payload.exp || Date.now() > payload.exp) {
-      return null;
-    }
-    return payload;
-  } catch (error) {
+  if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) {
     return null;
   }
+  const [email, exp] = payload.split('.');
+  if (!email || !exp || Date.now() / 1000 > Number(exp)) {
+    return null;
+  }
+  return { email };
 }
 
 function sessionCookie(token) {
-  return `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${ONE_DAY_SECONDS}`;
+  return `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_TTL}`;
 }
 
 function clearSessionCookie() {
@@ -68,28 +92,32 @@ function clearSessionCookie() {
 }
 
 function requireConfig(res) {
-  const secrets = getSecrets();
-  if (!secrets.user || !secrets.pass || !secrets.secret) {
+  const config = getAuthConfig();
+  if (!config.databaseUrl || !config.secret) {
     res.status(500).json({ error: 'Core auth is not configured on the server.' });
     return null;
   }
-  return secrets;
+  return config;
 }
 
-function isAuthenticated(req, secrets) {
+function isAuthenticated(req, config) {
   const cookies = parseCookies(req);
-  const payload = decodeAndValidateSession(cookies[COOKIE_NAME], secrets.secret);
+  const payload = decodeAndValidateSession(cookies[COOKIE_NAME], config.secret);
   if (!payload) {
     return false;
   }
-  return payload.userid === secrets.user;
+  return Boolean(payload.email);
 }
 
 module.exports = {
   COOKIE_NAME,
-  getSecrets,
+  SESSION_TTL,
+  getPool,
   requireConfig,
+  verifyPassword,
   encodeSession,
+  decodeAndValidateSession,
+  parseCookies,
   sessionCookie,
   clearSessionCookie,
   isAuthenticated,
