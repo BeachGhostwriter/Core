@@ -6,6 +6,16 @@ const {
   sessionCookie,
 } = require('./core-auth-lib');
 
+function maskIdentifier(value) {
+  const id = String(value || '').trim();
+  if (!id) return 'empty';
+  const [local = '', domain = ''] = id.split('@');
+  if (!domain) {
+    return `${local.slice(0, 2)}***`;
+  }
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
@@ -58,9 +68,23 @@ module.exports = async function handler(req, res) {
     );
 
     const user = rows[0];
-    if (!user || !verifyPassword(password, user.password_hash)) {
+    if (!user) {
+      console.info('Core login denied: user_not_found', {
+        identifier: maskIdentifier(identifier),
+      });
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
+
+    if (!verifyPassword(password, user.password_hash)) {
+      console.info('Core login denied: password_mismatch', {
+        identifier: maskIdentifier(identifier),
+      });
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    console.info('Core login success', {
+      identifier: maskIdentifier(user.email || identifier),
+    });
 
     const token = encodeSession(user.email, config.secret);
     res.setHeader('Set-Cookie', sessionCookie(token));
